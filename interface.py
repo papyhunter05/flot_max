@@ -57,7 +57,6 @@ class Application(tk.Tk):
         self.etapes_ff     = []          # liste d'étapes Ford-Fulkerson
         self.etape_idx     = 0           # index dans la phase courante
         self.phase         = "bloch"     # "bloch" ou "ff"
-
         # Mode création de graphe interactif (désactivé en interface)
         self.mode_creation = False       # True = mode création, False = mode normal
         self.nœuds_creation = set()      # nœuds créés
@@ -75,16 +74,36 @@ class Application(tk.Tk):
 
     def _construire_interface(self):
         """Crée les deux colonnes principales de la fenêtre."""
-        # Colonne gauche : saisie
+        # Colonne gauche : saisie avec scroll vertical
         panneau_gauche = tk.Frame(self, bg=BG, width=340)
         panneau_gauche.pack(side=tk.LEFT, fill=tk.Y)
         panneau_gauche.pack_propagate(False)
+
+        gauche_canvas = tk.Canvas(panneau_gauche, bg=BG, highlightthickness=0)
+        gauche_scrollbar = tk.Scrollbar(panneau_gauche, orient=tk.VERTICAL, command=gauche_canvas.yview)
+        gauche_canvas.configure(yscrollcommand=gauche_scrollbar.set)
+        gauche_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        gauche_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.panneau_gauche_canvas = gauche_canvas
+        self.panneau_gauche_contenu = tk.Frame(gauche_canvas, bg=BG)
+        self._gauche_window = gauche_canvas.create_window((0, 0), window=self.panneau_gauche_contenu, anchor="nw")
+        self.panneau_gauche_contenu.bind(
+            "<Configure>",
+            lambda event: gauche_canvas.configure(scrollregion=gauche_canvas.bbox("all"))
+        )
+        gauche_canvas.bind(
+            "<Configure>",
+            lambda event: gauche_canvas.itemconfig(self._gauche_window, width=event.width)
+        )
+        gauche_canvas.bind("<Enter>", lambda e: gauche_canvas.bind_all("<MouseWheel>", self._on_gauche_mousewheel))
+        gauche_canvas.bind("<Leave>", lambda e: gauche_canvas.unbind_all("<MouseWheel>"))
 
         # Colonne droite : visualisation
         panneau_droit = tk.Frame(self, bg=BG)
         panneau_droit.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self._construire_panneau_gauche(panneau_gauche)
+        self._construire_panneau_gauche(self.panneau_gauche_contenu)
         self._construire_panneau_droit(panneau_droit)
 
     # ── Panneau gauche ────────────────────────────────────────────────────────
@@ -111,17 +130,6 @@ class Application(tk.Tk):
         # ── Panneau interactif (création graphique) ──
         self.interactif_frame = tk.Frame(corps, bg=BG)
 
-        # ── Source / Puits ──
-        label_section(corps, "Réseau de transport").pack(anchor="w", pady=(8, 2))
-        self._bloc_source_puits(corps)
-
-        # ── Résultat final ──
-        separateur(corps).pack(fill=tk.X, pady=10)
-        self.lbl_resultat = tk.Label(corps, text="",
-                                     bg=BG, fg=YELLOW,
-                                     font=("Helvetica", 12, "bold"),
-                                     wraplength=300)
-        self.lbl_resultat.pack(fill=tk.X)
 
     def _construire_tableau_arcs(self, parent):
         """Panneau de saisie manuelle (mode tableau)."""
@@ -145,27 +153,6 @@ class Application(tk.Tk):
                bg=GREEN, fg=BG,
                police=("Helvetica", 12, "bold")).pack(fill=tk.X, ipady=8)
 
-        # ── Navigation étape par étape ──
-        separateur(parent).pack(fill=tk.X, pady=10)
-        label_section(parent, "Navigation étape par étape").pack(anchor="w", pady=(0, 4))
-
-        nav = tk.Frame(parent, bg=BG)
-        nav.pack(fill=tk.X)
-        self.btn_prev = bouton(nav, "◀ Préc.", self._etape_precedente)
-        self.btn_prev.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 4))
-        self.btn_next = bouton(nav, "Suiv. ▶", self._etape_suivante)
-        self.btn_next.pack(side=tk.LEFT, expand=True, fill=tk.X)
-
-        # Bouton pour afficher directement le flot maximal
-        self.btn_direct = bouton(parent, "🎯 Flot maximal direct", self._afficher_flot_maximal_direct,
-                                 bg=ORANGE, fg=BG)
-        self.btn_direct.pack(fill=tk.X, ipady=6, pady=6)
-
-        # Compteur
-        self.var_compteur = tk.StringVar(value="–")
-        tk.Label(parent, textvariable=self.var_compteur,
-                 bg=BG, fg=ACCENT,
-                 font=("Helvetica", 10, "bold")).pack(pady=(6, 0))
 
     def _activer_mode(self, mode):
         """Active le mode de visualisation.
@@ -312,12 +299,23 @@ class Application(tk.Tk):
                                  padx=12, pady=8)
         self.lbl_desc.pack(fill=tk.X, padx=16, pady=4)
 
+        # Zone de contenu divisé en deux colonnes : graphe à gauche, panneau droit à droite
+        zone_graphique = tk.Frame(parent, bg=BG)
+        zone_graphique.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+
+        graph_frame = tk.Frame(zone_graphique, bg=BG)
+        graph_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        panneau_droite = tk.Frame(zone_graphique, bg=BG, width=320)
+        panneau_droite.pack(side=tk.LEFT, fill=tk.Y)
+        panneau_droite.pack_propagate(False)
+
         # Canvas matplotlib
-        self.fig, self.ax = plt.subplots(figsize=(9, 5.5))
+        self.fig, self.ax = plt.subplots(figsize=(7, 5))
         self.fig.patch.set_facecolor(BG)
         self.ax.set_facecolor(BG)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=graph_frame)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         # Variables pour le zoom et le pan
         self.zoom_level = 1.0
@@ -332,8 +330,40 @@ class Application(tk.Tk):
         self.canvas.mpl_connect('button_release_event', self._on_mouse_release)
         self.canvas.mpl_connect('motion_notify_event', self._on_mouse_motion)
 
+        # Contrôles additionnels (transport et navigation)
+        controls = tk.Frame(panneau_droite, bg=BG)
+        controls.pack(fill=tk.BOTH, expand=True)
+
+        label_section(controls, "Réseau de transport").pack(anchor="w", pady=(0, 4))
+        self._bloc_source_puits(controls)
+
+        self.lbl_resultat = tk.Label(controls, text="",
+                                     bg=BG, fg=YELLOW,
+                                     font=("Helvetica", 12, "bold"),
+                                     wraplength=280, justify="left")
+        self.lbl_resultat.pack(fill=tk.X, pady=(8, 12))
+
+        separateur(controls).pack(fill=tk.X, pady=10)
+        label_section(controls, "Navigation étape par étape").pack(anchor="w", pady=(0, 4))
+
+        nav = tk.Frame(controls, bg=BG)
+        nav.pack(fill=tk.X)
+        self.btn_prev = bouton(nav, "◀ Préc.", self._etape_precedente)
+        self.btn_prev.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 4))
+        self.btn_next = bouton(nav, "Suiv. ▶", self._etape_suivante)
+        self.btn_next.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        self.btn_direct = bouton(controls, "🎯 Flot maximal direct", self._afficher_flot_maximal_direct,
+                                 bg=ORANGE, fg=BG)
+        self.btn_direct.pack(fill=tk.X, ipady=6, pady=6)
+
+        self.var_compteur = tk.StringVar(value="–")
+        tk.Label(controls, textvariable=self.var_compteur,
+                 bg=BG, fg=ACCENT,
+                 font=("Helvetica", 10, "bold")).pack(pady=(6, 0))
+
         # Légende des couleurs
-        self._construire_legende(parent)
+        self._construire_legende(panneau_droite)
 
     def _on_mouse_press(self, event):
         """Handler unifié pour le clic souris (gauche = 1, droit = 3)."""
@@ -422,6 +452,15 @@ class Application(tk.Tk):
         self.ax.set_xlim(self.pan_x - range_val, self.pan_x + range_val)
         self.ax.set_ylim(self.pan_y - range_val, self.pan_y + range_val)
         self.canvas.draw_idle()
+
+    def _on_gauche_mousewheel(self, event):
+        """Défilement vertical du panneau gauche."""
+        if event.delta:
+            self.panneau_gauche_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        elif event.num == 4:
+            self.panneau_gauche_canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            self.panneau_gauche_canvas.yview_scroll(1, "units")
 
     def _construire_legende(self, parent):
         """Barre de légende en bas du graphe."""
@@ -551,6 +590,7 @@ class Application(tk.Tk):
         # Résultat final
         val = sum(f_max.get((self.solver.source, j), 0) for j in self.solver.sommets)
         self.lbl_resultat.config(text=f"🏆 Flot maximal = {val} unités")
+
 
     # =========================================================================
     # Affichage direct du flot maximal

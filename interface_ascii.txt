@@ -1,0 +1,180 @@
+001: """
+002: interface.py
+003: \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+004: Fen\xeatre principale de l'application tkinter.
+005: 
+006: Responsabilit\xe9s :
+007:   \u2022 Construire et afficher tous les \xe9l\xe9ments de l'interface
+008:   \u2022 G\xe9rer la saisie du r\xe9seau (arcs, source, puits)
+009:   \u2022 D\xe9clencher la r\xe9solution (appels aux algorithmes)
+010:   \u2022 Naviguer entre les \xe9tapes de l'animation
+011:   \u2022 D\xe9l\xe9guer tout le dessin du graphe au module graphe.py
+012: """
+013: 
+014: import tkinter as tk
+015: from tkinter import messagebox
+016: import matplotlib
+017: matplotlib.use("TkAgg")
+018: import matplotlib.pyplot as plt
+019: from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+020: 
+021: # Modules du projet
+022: from constantes import (
+023:     BG, PANEL, CARD, BORDER,
+024:     ACCENT, ACCENT2,
+025:     GREEN, RED, ORANGE, YELLOW,
+026:     TEXT, TEXT_DIM,
+027:     EXEMPLE_ARCS, EXEMPLE_SOURCE, EXEMPLE_PUITS,
+028: )
+029: from widgets   import label_section, champ_texte, bouton, separateur, ligne_arc
+030: from graphe    import calculer_positions, dessiner_graphe
+031: from algorithmes import FlotMaximal
+032: 
+033: 
+034: class Application(tk.Tk):
+035:     """
+036:     Fen\xeatre principale.
+037: 
+038:     Structure :
+039:     \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510
+040:     \u2502  Panneau    \u2502  Zone de visualisation (matplotlib)  \u2502
+041:     \u2502  de saisie  \u2502  + titre de phase + description      \u2502
+042:     \u2502  (gauche)   \u2502  + l\xe9gende                           \u2502
+043:     \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518
+044:     """
+045: 
+046:     def __init__(self):
+047:         super().__init__()
+048:         self.title("Flot Maximal \u2013 Manuel Bloch & Ford-Fulkerson")
+049:         self.configure(bg=BG)
+050:         self.state("zoomed")
+051: 
+052:         # \xc9tat interne
+053:         self.arcs_entries  = []          # liste de (var_de, var_vers, var_cap, frame)
+054:         self.solver        = None        # instance FlotMaximal courante
+055:         self.positions     = {}          # coordonn\xe9es des n\u0153uds
+056:         self.etapes_bloch  = []          # liste d'\xe9tapes Manuel Bloch
+057:         self.etapes_ff     = []          # liste d'\xe9tapes Ford-Fulkerson
+058:         self.etape_idx     = 0           # index dans la phase courante
+059:         self.phase         = "bloch"     # "bloch" ou "ff"
+060:         self.suggestions   = []          # propositions d'am\xe9lioration de capacit\xe9s
+061: 
+062:         # Mode cr\xe9ation de graphe interactif (d\xe9sactiv\xe9 en interface)
+063:         self.mode_creation = False       # True = mode cr\xe9ation, False = mode normal
+064:         self.n\u0153uds_creation = set()      # n\u0153uds cr\xe9\xe9s
+065:         self.arcs_creation = {}          # {(i,j): capacit\xe9}
+066:         self.n\u0153ud_en_cours = None        # n\u0153ud de d\xe9part du drag en cours
+067:         self.n\u0153ud_a_deplacer = None      # n\u0153ud en cours de d\xe9placement
+068:         self.positions_creation = {}     # positions des n\u0153uds cr\xe9\xe9s
+069: 
+070:         self._construire_interface()
+071:         self._charger_exemple()
+072: 
+073:     # =========================================================================
+074:     # Construction de l'interface
+075:     # =========================================================================
+076: 
+077:     def _construire_interface(self):
+078:         """Cr\xe9e les deux colonnes principales de la fen\xeatre."""
+079:         # Colonne gauche : saisie
+080:         panneau_gauche = tk.Frame(self, bg=BG, width=340)
+081:         panneau_gauche.pack(side=tk.LEFT, fill=tk.Y)
+082:         panneau_gauche.pack_propagate(False)
+083: 
+084:         # Colonne droite : visualisation
+085:         panneau_droit = tk.Frame(self, bg=BG)
+086:         panneau_droit.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+087: 
+088:         self._construire_panneau_gauche(panneau_gauche)
+089:         self._construire_panneau_droit(panneau_droit)
+090: 
+091:     # \u2500\u2500 Panneau gauche \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+092: 
+093:     def _construire_panneau_gauche(self, parent):
+094:         # En-t\xeate color\xe9
+095:         entete = tk.Frame(parent, bg=ACCENT, height=60)
+096:         entete.pack(fill=tk.X)
+097:         entete.pack_propagate(False)
+098:         tk.Label(entete, text="\u2b21  FLOT MAXIMAL",
+099:                  bg=ACCENT, fg=BG,
+100:                  font=("Helvetica", 14, "bold")).pack(side=tk.LEFT, padx=16, pady=12)
+101: 
+102:         corps = tk.Frame(parent, bg=BG)
+103:         corps.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+104: 
+105:         separateur(corps).pack(fill=tk.X, pady=8)
+106: 
+107:         # \u2500\u2500 Panneau tableau (arcs manuels) \u2500\u2500
+108:         self.tableau_frame = tk.Frame(corps, bg=BG)
+109:         self._construire_tableau_arcs(self.tableau_frame)
+110:         self.tableau_frame.pack(fill=tk.X)
+111: 
+112:         # \u2500\u2500 Panneau interactif (cr\xe9ation graphique) \u2500\u2500
+113:         self.interactif_frame = tk.Frame(corps, bg=BG)
+114: 
+115:         # \u2500\u2500 Source / Puits \u2500\u2500
+116:         label_section(corps, "R\xe9seau de transport").pack(anchor="w", pady=(8, 2))
+117:         self._bloc_source_puits(corps)
+118: 
+119:         # \u2500\u2500 R\xe9sultat final \u2500\u2500
+120:         separateur(corps).pack(fill=tk.X, pady=10)
+121:         self.lbl_resultat = tk.Label(corps, text="",
+122:                                      bg=BG, fg=YELLOW,
+123:                                      font=("Helvetica", 12, "bold"),
+124:                                      wraplength=300)
+125:         self.lbl_resultat.pack(fill=tk.X)
+126: 
+127:         self.lbl_suggestions = tk.Label(corps, text="",
+128:                                         bg=BG, fg=TEXT,
+129:                                         font=("Helvetica", 9),
+130:                                         wraplength=300, justify="left")
+131:         self.lbl_suggestions.pack(fill=tk.X, pady=(6, 0))
+132: 
+133:     def _construire_tableau_arcs(self, parent):
+134:         """Panneau de saisie manuelle (mode tableau)."""
+135:         label_section(parent, "Arcs  (n\u0153ud_i \u2192 n\u0153ud_j : capacit\xe9)").pack(anchor="w", pady=(8, 2))
+136:         self._entetes_table(parent)
+137: 
+138:         self.arcs_frame = tk.Frame(parent, bg=BG)
+139:         self.arcs_frame.pack(fill=tk.X)
+140: 
+141:         # Boutons ajouter / exemple
+142:         ligne_btn = tk.Frame(parent, bg=BG)
+143:         ligne_btn.pack(fill=tk.X, pady=6)
+144:         bouton(ligne_btn, "+ Ajouter arc", self._ajouter_arc_vide,
+145:                bg=ACCENT2, fg=BG).pack(side=tk.LEFT)
+146:         bouton(ligne_btn, "Exemple", self._charger_exemple,
+147:                bg=CARD, fg=TEXT_DIM).pack(side=tk.RIGHT)
+148: 
+149:         # \u2500\u2500 Bouton R\xe9soudre \u2500\u2500
+150:         separateur(parent).pack(fill=tk.X, pady=10)
+151:         bouton(parent, "\u25b6  R\xe9soudre", self._resoudre,
+152:                bg=GREEN, fg=BG,
+153:                police=("Helvetica", 12, "bold")).pack(fill=tk.X, ipady=8)
+154: 
+155:         # \u2500\u2500 Navigation \xe9tape par \xe9tape \u2500\u2500
+156:         separateur(parent).pack(fill=tk.X, pady=10)
+157:         label_section(parent, "Navigation \xe9tape par \xe9tape").pack(anchor="w", pady=(0, 4))
+158: 
+159:         nav = tk.Frame(parent, bg=BG)
+160:         nav.pack(fill=tk.X)
+161:         self.btn_prev = bouton(nav, "\u25c0 Pr\xe9c.", self._etape_precedente)
+162:         self.btn_prev.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 4))
+163:         self.btn_next = bouton(nav, "Suiv. \u25b6", self._etape_suivante)
+164:         self.btn_next.pack(side=tk.LEFT, expand=True, fill=tk.X)
+165: 
+166:         # Bouton pour afficher directement le flot maximal
+167:         self.btn_direct = bouton(parent, "\U0001f3af Flot maximal direct", self._afficher_flot_maximal_direct,
+168:                                  bg=ORANGE, fg=BG)
+169:         self.btn_direct.pack(fill=tk.X, ipady=6, pady=6)
+170: 
+171:         # Compteur
+172:         self.var_compteur = tk.StringVar(value="\u2013")
+173:         tk.Label(parent, textvariable=self.var_compteur,
+174:                  bg=BG, fg=ACCENT,
+175:                  font=("Helvetica", 10, "bold")).pack(pady=(6, 0))
+176: 
+177:     def _activer_mode(self, mode):
+178:         """Active le mode de visualisation.
+179: 
+180:         Le mode cr\xe9ation est d\xe9sactiv\xe9 dans cette version de l'interface.

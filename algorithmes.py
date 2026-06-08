@@ -403,6 +403,43 @@ class FlotMaximal:
             chemin.reverse()
         return etiquettes, chemin
 
+    def suggestions_amelioration(self, f: dict, r: dict, max_suggestions: int = 3) -> list[str]:
+        """Propose des arcs à augmenter de capacité sans modifier le graphe."""
+        if self.source is None or self.puits is None:
+            return []
+
+        # Recherche des sommets atteignables dans le graphe résiduel.
+        atteignables = {self.source}
+        pile = [self.source]
+        while pile:
+            u = pile.pop()
+            for (i, j) in self.C:
+                if i == u and j not in atteignables and r.get((i, j), 0) > 0:
+                    atteignables.add(j)
+                    pile.append(j)
+                if j == u and i not in atteignables and f.get((i, j), 0) > 0:
+                    atteignables.add(i)
+                    pile.append(i)
+
+        suggestions = []
+        for (i, j), cap in self.C.items():
+            if i in atteignables and j not in atteignables and f.get((i, j), 0) >= cap:
+                suggestions.append((i, j, cap))
+
+        if not suggestions:
+            return []
+
+        lignes = []
+        for i, j, cap in suggestions[:max_suggestions]:
+            lignes.append(
+                f"Augmenter la capacité de {i}→{j} de 1 unité (capacité actuelle {cap}) pourrait permettre un gain de flot maximal de +1 unité."
+            )
+        if len(suggestions) > max_suggestions:
+            lignes.append(
+                f"Et {len(suggestions) - max_suggestions} autre(s) arc(s) saturé(s) du min-cut pourraient aussi être analysé(s)."
+            )
+        return lignes
+
     def _calculer_delta(self, chemin, f, r):
         """
         Calcule δ = min des capacités résiduelles (sens +) ou flux (sens −)
